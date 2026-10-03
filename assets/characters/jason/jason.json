@@ -1,0 +1,36 @@
+{
+  "columns": 6,
+  "rows": 7,
+  "frame_width": 64,
+  "frame_height": 64,
+  "animations": {
+    "idle": {
+      "start_frame": 0,
+      "end_frame": 5
+    },
+    "run": {
+      "start_frame": 6,
+      "end_frame": 11
+    },
+    "jump": {
+      "start_frame": 12,
+      "end_frame": 17
+    },
+    "fall": {
+      "start_frame": 18,
+      "end_frame": 23
+    },
+    "ability": {
+      "start_frame": 24,
+      "end_frame": 29
+    },
+    "hurt": {
+      "start_frame": 30,
+      "end_frame": 35
+    },
+    "death": {
+      "start_frame": 36,
+      "end_frame": 41
+    }
+  }
+}
