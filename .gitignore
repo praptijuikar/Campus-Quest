@@ -4,6 +4,9 @@ __pycache__/
 .pytest_cache/
 .coverage
 htmlcov/
+game_progress.db
+game_progress.db-shm
+game_progress.db-wal
 
 .env
 .env.*

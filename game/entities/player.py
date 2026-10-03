@@ -31,7 +31,7 @@ class Player:
         self.ground_y = 0
         self.character_name = "Krrish"
         self.character = get_character_definition(self.character_name)
-        self.can_double_jump = self.character.name == "Krrish"
+        self.can_double_jump = False
         self.jump_count = 0
         self.jump_held = False
         self.audio = None
@@ -61,7 +61,7 @@ class Player:
     def set_character(self, character) -> None:
         self.character = character
         self.character_name = getattr(character, "name", "Krrish")
-        self.can_double_jump = self.character_name == "Krrish"
+        self.can_double_jump = False
         self.jump_count = 0
         self.freeze_timer = 0.0
         self.freeze_cooldown = 0.0

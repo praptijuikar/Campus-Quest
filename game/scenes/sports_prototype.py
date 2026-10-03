@@ -119,6 +119,7 @@ class SportsPrototypeScene(Scene):
 
         self.title_font = pygame.font.SysFont(None, 42, bold=True)
         self.label_font = pygame.font.SysFont(None, 24)
+        self.hud_font = pygame.font.SysFont(None, 21, bold=True)
         self.hint_font = pygame.font.SysFont(None, 30)
 
     def reset_level(self) -> None:
@@ -139,6 +140,7 @@ class SportsPrototypeScene(Scene):
         self.visual_time = 0.0
         self.collection_bursts.clear()
         self.double_jump_unlocked = False
+        self.player.can_double_jump = False
         self.player.reset_jump_state()
         for item in self.collectibles:
             item["collected"] = False
@@ -146,12 +148,67 @@ class SportsPrototypeScene(Scene):
             checkpoint["active"] = False
         self.collected_count = 0
 
+    def _collected_item_ids(self) -> list[int]:
+        return [index for index, item in enumerate(self.collectibles) if item["collected"]]
+
+    def _save_progress(self, *, completed: bool = False) -> None:
+        save_progress = getattr(self.game, "save_progress", None)
+        if save_progress is None:
+            return
+        checkpoint_index = next(
+            (index + 1 for index, checkpoint in enumerate(self.checkpoints) if checkpoint["active"]),
+            0,
+        )
+        save_progress(
+            checkpoint=checkpoint_index,
+            collected_items=self._collected_item_ids(),
+            completed=completed,
+        )
+
+    def _restore_progress(self) -> None:
+        progress = getattr(self.game, "saved_progress", {})
+        same_run = (
+            progress.get("character") == self.state.selected_character
+            and progress.get("map_name") == self.level_name
+            and not progress.get("completed", 0)
+        )
+        self.state.game_completed = False
+        if not same_run:
+            self._save_progress()
+            return
+
+        collected_ids = {
+            index
+            for index in progress.get("collected_items", [])
+            if isinstance(index, int) and 0 <= index < len(self.collectibles)
+        }
+        for index, item in enumerate(self.collectibles):
+            item["collected"] = index in collected_ids
+        self.collected_count = len(collected_ids)
+
+        checkpoint_index = int(progress.get("checkpoint", 0))
+        if 1 <= checkpoint_index <= len(self.checkpoints):
+            checkpoint = self.checkpoints[checkpoint_index - 1]
+            checkpoint["active"] = True
+            self.current_checkpoint = checkpoint["spawn"]
+            self.player.rect.topleft = self.current_checkpoint
+            self.player.on_ground = True
+
+        if (
+            self.state.selected_character == "Krrish"
+            and self.collected_count >= self.double_jump_goal
+        ):
+            self.double_jump_unlocked = True
+            self.player.enable_double_jump()
+        self._save_progress()
+
     def on_enter(self) -> None:
         self.state.current_scene = "sports_prototype"
         self.state.current_map = "Campus Track"
         self.state.select_map("Campus Track")
         self.player.set_character(get_character_definition(self.state.selected_character))
         self.reset_level()
+        self._restore_progress()
 
     def trigger_death(self) -> None:
         if self.player_dead or self.level_complete:
@@ -247,11 +304,17 @@ class SportsPrototypeScene(Scene):
         if self.player.rect.bottom > self.ground_y + 220 or self.player.rect.y > SCREEN_HEIGHT + 200:
             self.trigger_death()
 
+        collected_new_item = False
         for item in self.collectibles:
             if not item["collected"] and self.player.rect.colliderect(item["rect"]):
                 item["collected"] = True
+                collected_new_item = True
                 self.collected_count += 1
-                if not self.double_jump_unlocked and self.collected_count >= self.double_jump_goal:
+                if (
+                    self.state.selected_character == "Krrish"
+                    and not self.double_jump_unlocked
+                    and self.collected_count >= self.double_jump_goal
+                ):
                     self.double_jump_unlocked = True
                     self.player.enable_double_jump()
                     self.collection_message = "Double Jump unlocked!"
@@ -270,17 +333,30 @@ class SportsPrototypeScene(Scene):
                 if hasattr(self.game, "audio"):
                     self.game.audio.play_sfx("collect")
 
+        if collected_new_item:
+            self._save_progress()
+
+        checkpoint_activated = False
         for checkpoint in self.checkpoints:
             if not checkpoint["active"] and self.player.rect.colliderect(checkpoint["rect"]):
                 checkpoint["active"] = True
                 self.current_checkpoint = checkpoint["spawn"]
+                checkpoint_activated = True
                 if hasattr(self.game, "audio"):
                     self.game.audio.play_sfx("checkpoint")
 
+        if checkpoint_activated:
+            self._save_progress()
+
         if self.player.rect.colliderect(self.goal_rect):
             self.level_complete = True
+            self.state.game_completed = True
+            self._save_progress(completed=True)
             if hasattr(self.game, "audio"):
                 self.game.audio.play_sfx("goal")
+            if "completion" in self.manager.scenes:
+                self.manager.change_scene("completion")
+                return
 
         self.camera.update(self.player.rect.centerx)
         self.camera_x = self.camera.x
@@ -447,19 +523,19 @@ class SportsPrototypeScene(Scene):
         )
         self.player.draw(surface, self.camera_x)
 
-        panel = pygame.Rect(16, 14, 330, 72)
+        panel = pygame.Rect(16, 14, 330, 88)
         pygame.draw.rect(surface, (31, 55, 71), panel, border_radius=8)
         pygame.draw.rect(surface, (218, 195, 151), panel, width=2, border_radius=8)
-        label = self.label_font.render(f"{self.state.selected_character.upper()}  HERO", True, (250, 241, 215))
-        marks = self.label_font.render(f"MARKS  {self.collected_count:02} / {self.total_collectibles:02}", True, (255, 215, 113))
-        status = self.label_font.render(
+        label = self.hud_font.render(f"{self.state.selected_character.upper()}  HERO", True, (250, 241, 215))
+        marks = self.hud_font.render(f"MARKS  {self.collected_count:02} / {self.total_collectibles:02}", True, (255, 215, 113))
+        status = self.hud_font.render(
             "DOUBLE JUMP" if self.double_jump_unlocked else f"NEEDS {max(0, self.double_jump_goal - self.collected_count)} MARKS",
             True,
             (162, 232, 176) if self.double_jump_unlocked else (232, 201, 143),
         )
-        surface.blit(label, (28, 22))
-        surface.blit(marks, (28, 46))
-        surface.blit(status, (28, 58))
+        surface.blit(label, (28, 19))
+        surface.blit(marks, (28, 43))
+        surface.blit(status, (28, 67))
 
         if self.collection_message:
             collection_text = self.hint_font.render(self.collection_message, True, (255, 231, 164))

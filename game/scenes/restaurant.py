@@ -80,6 +80,7 @@ class RestaurantScene(SportsPrototypeScene):
         self.state.select_map("Canteen")
         self.player.set_character(get_character_definition(self.state.selected_character))
         self.reset_level()
+        self._restore_progress()
 
     def draw(self, surface: pygame.Surface) -> None:
         self.restaurant_renderer.draw_background(
