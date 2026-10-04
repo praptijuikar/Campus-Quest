@@ -18,11 +18,14 @@ concurrency:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
+
     env:
       SDL_VIDEODRIVER: dummy
+
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -33,16 +36,24 @@ jobs:
           python-version: "3.12"
 
       - name: Install build and test dependencies
-        run: python -m pip install pygbag==0.9.3 pygame==2.6.1 pytest
+        run: |
+          python -m pip install pygbag==0.9.3 pygame==2.6.1 pytest
 
       - name: Run project tests
-        run: python -m pytest -q
+        run: |
+          python -m pytest -q
 
       - name: Verify character sprites
-        run: PYTHONPATH="$GITHUB_WORKSPACE" python tools/verify_runtime_sprites.py
+        run: |
+          PYTHONPATH="$GITHUB_WORKSPACE" python tools/verify_runtime_sprites.py
 
       - name: Build browser game
-        run: python -m pygbag --build --cdn https://pygame-web.github.io/archives/0.9/ .
+        run: |
+          python -m pygbag \
+            --build \
+            --app_name campus-quest \
+            --cdn https://pygame-web.github.io/archives/0.9/ \
+            .
 
       - name: Validate and stage Pages files
         run: |
@@ -52,49 +63,100 @@ jobs:
           from zipfile import ZipFile
 
           def fail(message):
-            print(f"::error title=Pages artifact validation::{message}")
-            raise SystemExit(message)
+              print(f"::error title=Pages artifact validation::{message}")
+              raise SystemExit(message)
 
           web_dir = Path("build/web")
-          app_archive = web_dir / "game.apk"
-          required_files = (web_dir / "index.html", app_archive)
-          missing_files = [str(path) for path in required_files if not path.is_file() or path.stat().st_size == 0]
-          if missing_files:
-            fail(f"Missing or empty Pygbag output files: {missing_files}")
+
+          if not web_dir.is_dir():
+              fail("Pygbag build/web directory was not created.")
+
+          index_file = web_dir / "index.html"
+
+          if not index_file.is_file() or index_file.stat().st_size == 0:
+              fail("Missing or empty build/web/index.html")
+
+          archives = sorted(web_dir.glob("*.apk"))
+
+          if not archives:
+              fail("No Pygbag .apk archive was generated in build/web")
+
+          if len(archives) > 1:
+              print(f"Found multiple Pygbag archives: {[p.name for p in archives]}")
+
+          app_archive = next(
+              (p for p in archives if p.name == "campus-quest.apk"),
+              archives[0]
+          )
+
+          print(f"Using Pygbag archive: {app_archive}")
 
           try:
-            package = ZipFile(app_archive)
+              package = ZipFile(app_archive)
           except Exception as error:
-            fail(f"Pygbag app archive is not a valid ZIP: {error}")
+              fail(f"Pygbag app archive is not a valid ZIP: {error}")
 
           with package:
               names = package.namelist()
+
               required = (
                   "assets/main.py",
                   "assets/assets/characters/jason/jason_spritesheet.png",
                   "assets/assets/characters/krrish/krrish_spritesheet.png",
               )
-              missing = [name for name in required if name not in names]
+
+              missing = [
+                  name for name in required
+                  if name not in names
+              ]
+
               excluded = [
                   name for name in names
                   if ".venv/" in name
                   or ".pytest_cache/" in name
                   or name.endswith("game_progress.db")
               ]
-              if missing or excluded:
-                  fail(f"Invalid game package: missing={missing}, excluded={excluded}")
+
+              if missing:
+                  fail(f"Invalid game package: missing={missing}")
+
+              if excluded:
+                  fail(f"Invalid game package: excluded={excluded}")
+
               corrupt = package.testzip()
+
               if corrupt:
                   fail(f"Corrupt entry in Pygbag app archive: {corrupt}")
-              print(f"Validated Pygbag archive with {len(names)} entries and both character sprites.")
+
+              print(
+                  f"Validated Pygbag archive with "
+                  f"{len(names)} entries and both character sprites."
+              )
 
           site_dir = Path("_site")
-          site_dir.mkdir(exist_ok=True)
-          for source in (web_dir / "index.html", web_dir / "favicon.png", app_archive):
+
+          if site_dir.exists():
+              shutil.rmtree(site_dir)
+
+          site_dir.mkdir(parents=True)
+
+          files_to_copy = [
+              index_file,
+              web_dir / "favicon.png",
+              app_archive,
+          ]
+
+          for source in files_to_copy:
               if source.is_file():
                   shutil.copy2(source, site_dir / source.name)
+                  print(f"Copied: {source}")
+
           (site_dir / ".nojekyll").touch()
+
           print(f"Pages artifact staged at {site_dir.resolve()}")
+          print("Pages files:")
+          for path in sorted(site_dir.iterdir()):
+              print(f" - {path.name}")
           PY
 
       - name: Configure GitHub Pages
