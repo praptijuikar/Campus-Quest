@@ -1,4 +1,6 @@
 import sqlite3
+import sys
+from types import SimpleNamespace
 
 import pygame
 
@@ -386,6 +388,39 @@ def test_progress_store_persists_local_data(tmp_path) -> None:
     assert recovered["collected_items"] == [0, 2, 7, 8, 11]
     assert recovered["completed"] == 1
     reopened.close()
+
+
+def test_browser_progress_uses_local_storage(monkeypatch) -> None:
+    from game.core import game as game_module
+
+    class MemoryStorage:
+        def __init__(self) -> None:
+            self.values: dict[str, str] = {}
+
+        def getItem(self, key: str) -> str | None:
+            return self.values.get(key)
+
+        def setItem(self, key: str, value: str) -> None:
+            self.values[key] = value
+
+    storage = MemoryStorage()
+    monkeypatch.setattr(game_module.sys, "platform", "emscripten")
+    monkeypatch.setitem(sys.modules, "platform", SimpleNamespace(window=SimpleNamespace(localStorage=storage)))
+
+    browser_storage, initial = game_module._load_browser_progress()
+    game = game_module.Game.__new__(game_module.Game)
+    game.browser_storage = browser_storage
+    game.progress_store = None
+    game.saved_progress = initial
+    game.state = GameState(selected_character="Krrish", current_map="Canteen")
+    game.save_progress(checkpoint=1, collected_items=[0, 2, 5, 7])
+
+    _, restored = game_module._load_browser_progress()
+    assert restored["character"] == "Krrish"
+    assert restored["map_name"] == "Canteen"
+    assert restored["score"] == 400
+    assert restored["checkpoint"] == 1
+    assert restored["collected_items"] == [0, 2, 5, 7]
 
 
 def test_progress_store_migrates_existing_schema(tmp_path) -> None:

@@ -1,0 +1,85 @@
+name: Deploy Campus Quest to GitHub Pages
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: github-pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    env:
+      SDL_VIDEODRIVER: dummy
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install build and test dependencies
+        run: python -m pip install pygbag==0.9.3 pygame==2.6.1 pytest
+
+      - name: Run project tests
+        run: python -m pytest -q
+
+      - name: Verify character sprites
+        run: PYTHONPATH="$GITHUB_WORKSPACE" python tools/verify_runtime_sprites.py
+
+      - name: Build browser game
+        run: python -m pygbag --build --cdn https://pygame-web.github.io/archives/0.9/ .
+
+      - name: Validate and stage Pages files
+        run: |
+          python - <<'PY'
+          from zipfile import ZipFile
+
+          with ZipFile("build/web/game.apk") as package:
+              names = package.namelist()
+              required = (
+                  "assets/main.py",
+                  "assets/assets/characters/jason/jason_spritesheet.png",
+                  "assets/assets/characters/krrish/krrish_spritesheet.png",
+              )
+              missing = [name for name in required if name not in names]
+              excluded = [
+                  name for name in names
+                  if ".venv/" in name
+                  or ".pytest_cache/" in name
+                  or name.endswith("game_progress.db")
+              ]
+              if missing or excluded:
+                  raise SystemExit(f"Invalid game package: missing={missing}, excluded={excluded}")
+          PY
+          test -s build/web/index.html
+          test -s build/web/favicon.png
+          mkdir -p _site
+          cp build/web/index.html build/web/favicon.png build/web/game.apk _site/
+          touch _site/.nojekyll
+
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
