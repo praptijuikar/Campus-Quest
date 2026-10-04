@@ -47,9 +47,27 @@ jobs:
       - name: Validate and stage Pages files
         run: |
           python - <<'PY'
+          import shutil
+          from pathlib import Path
           from zipfile import ZipFile
 
-          with ZipFile("build/web/game.apk") as package:
+          def fail(message):
+            print(f"::error title=Pages artifact validation::{message}")
+            raise SystemExit(message)
+
+          web_dir = Path("build/web")
+          app_archive = web_dir / "game.apk"
+          required_files = (web_dir / "index.html", app_archive)
+          missing_files = [str(path) for path in required_files if not path.is_file() or path.stat().st_size == 0]
+          if missing_files:
+            fail(f"Missing or empty Pygbag output files: {missing_files}")
+
+          try:
+            package = ZipFile(app_archive)
+          except Exception as error:
+            fail(f"Pygbag app archive is not a valid ZIP: {error}")
+
+          with package:
               names = package.namelist()
               required = (
                   "assets/main.py",
@@ -64,13 +82,20 @@ jobs:
                   or name.endswith("game_progress.db")
               ]
               if missing or excluded:
-                  raise SystemExit(f"Invalid game package: missing={missing}, excluded={excluded}")
+                  fail(f"Invalid game package: missing={missing}, excluded={excluded}")
+              corrupt = package.testzip()
+              if corrupt:
+                  fail(f"Corrupt entry in Pygbag app archive: {corrupt}")
+              print(f"Validated Pygbag archive with {len(names)} entries and both character sprites.")
+
+          site_dir = Path("_site")
+          site_dir.mkdir(exist_ok=True)
+          for source in (web_dir / "index.html", web_dir / "favicon.png", app_archive):
+              if source.is_file():
+                  shutil.copy2(source, site_dir / source.name)
+          (site_dir / ".nojekyll").touch()
+          print(f"Pages artifact staged at {site_dir.resolve()}")
           PY
-          test -s build/web/index.html
-          test -s build/web/favicon.png
-          mkdir -p _site
-          cp build/web/index.html build/web/favicon.png build/web/game.apk _site/
-          touch _site/.nojekyll
 
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v5
